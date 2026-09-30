@@ -50,7 +50,7 @@ make psql
 ### Step 2: Seed Sample Data
 
 ```bash
-make seed
+make seed TABLES="users products orders order_items"
 ```
 
 Expected output:

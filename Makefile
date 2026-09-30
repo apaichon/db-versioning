@@ -13,7 +13,8 @@ help:
 	@echo "  make migrate                 - Apply all pending migrations"
 	@echo "  make migrate MAX_VERSION=003 - Apply only migrations up to V003"
 	@echo "  make status                  - Show migration status"
-	@echo "  make seed                    - Insert sample data (users, products, orders)"
+	@echo "  make seed                    - Insert sample data (all tables)"
+	@echo "  make seed TABLES='users products' - Insert data for specific tables"
 	@echo "  make drop-tables             - Drop all tables (destructive!)"
 	@echo "  make rollback V=004          - Rollback to specific version"
 	@echo "  make new-migration V=007 DESC=add_payment_methods"
@@ -69,8 +70,13 @@ status:
 	./scripts/migrate.sh status
 
 seed:
-	@echo "Seeding database with sample data..."
+ifdef TABLES
+	@echo "Seeding database with sample data for tables: $(TABLES)..."
+	./scripts/seed-data.sh $(TABLES)
+else
+	@echo "Seeding database with all sample data..."
 	./scripts/seed-data.sh
+endif
 
 drop-tables:
 	@echo "WARNING: This will drop ALL tables in the database!"
