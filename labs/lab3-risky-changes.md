@@ -91,31 +91,55 @@ SELECT * FROM transactions LIMIT 5;
 \q
 ```
 
-### Step 4: The UNSAFE Way (Don't Do This!)
+### Step 4: When ADD COLUMN is NOT Safe
+
+Adding a nullable column is instant. But **adding a column with a volatile DEFAULT** forces PostgreSQL to **rewrite every row**.
 
 <div class="bg-red-500 bg-opacity-10 p-4 rounded">
 
-### ❌ Unsafe: Single ALTER with Default + UPDATE
+### ❌ Dangerous: ADD COLUMN with Volatile Default
 
 ```sql
--- This locks the table while rewriting all 10M rows!
-ALTER TABLE transactions ADD COLUMN category VARCHAR(50) DEFAULT 'general';
+-- Case 1: DEFAULT with volatile function → REWRITES ENTIRE TABLE
+ALTER TABLE transactions
+  ADD COLUMN reference_id UUID DEFAULT gen_random_uuid();
+-- This evaluates gen_random_uuid() for ALL 10M rows!
+-- Table is LOCKED for minutes. All reads/writes blocked.
 
--- This locks the table during the full table scan!
-UPDATE transactions SET category = 'premium' WHERE amount > 500;
+-- Case 2: DEFAULT with random() → REWRITES ENTIRE TABLE
+ALTER TABLE transactions
+  ADD COLUMN priority INTEGER DEFAULT (random() * 10)::int;
+-- Same problem — random() is volatile, must evaluate per row.
+
+-- Case 3: ADD COLUMN + CHECK constraint → FULL TABLE SCAN
+ALTER TABLE transactions
+  ADD COLUMN score INTEGER DEFAULT 0,
+  ADD CONSTRAINT score_check CHECK (score >= 0 AND score <= 100);
+-- CHECK constraint scans all 10M rows while holding lock.
+
+-- Case 4: ADD COLUMN + NOT NULL without default → FAILS
+ALTER TABLE transactions
+  ADD COLUMN label VARCHAR(50) NOT NULL;
+-- ERROR: column "label" contains null values
+-- Cannot add NOT NULL to existing rows without a default.
 ```
 
-**Impact on 10M rows:**
-- Table locked for 2-5 minutes
-- All reads and writes blocked
-- Application timeouts
-- Production outage
+**Why these are slow on 10M rows:**
+
+| Operation | Why Slow | Lock Duration |
+|-----------|----------|---------------|
+| `DEFAULT gen_random_uuid()` | Volatile function → rewrite all rows | 3-10 min |
+| `DEFAULT random()` | Volatile function → rewrite all rows | 3-10 min |
+| `ADD CHECK constraint` | Full table scan to validate | 1-5 min |
+| `ADD FOREIGN KEY` | Full table scan + lock referenced table | 1-5 min |
+| `ADD UNIQUE constraint` | Full table scan + build index | 2-10 min |
+| `ALTER COLUMN TYPE` | Rewrite all rows + cast each value | 5-20 min |
 
 </div>
 
-### Step 5: The SAFE Way — Step 1: Add Nullable Column
+### Step 5: The Safe Way — Step 1: Add Nullable Column (No Default)
 
-Adding a **nullable column** is metadata-only in PostgreSQL. It doesn't rewrite the table.
+Adding a **nullable column with NO default** is metadata-only in PostgreSQL. It doesn't rewrite any rows.
 
 ```bash
 make new-migration V=010 DESC=add_category_to_transactions_safe
@@ -164,7 +188,93 @@ SELECT category, COUNT(*) FROM transactions GROUP BY category;
 
 **Key point:** Adding a nullable column is instant even on 10M+ rows. PostgreSQL only updates the table metadata.
 
-### Step 6: The SAFE Way — Step 2: Batch Backfill
+### Step 5b: Safe Alternative for Volatile Defaults (UUID Example)
+
+If you need a column with `gen_random_uuid()` (or any volatile default), **never** add it with `DEFAULT` directly. Use this 3-step pattern instead:
+
+```bash
+make new-migration V=010b DESC=add_reference_id_safe
+```
+
+Edit `migrations/V010b__add_reference_id_safe.sql`:
+
+```sql
+-- Migration: V010b - Add reference_id UUID safely (NO volatile default)
+-- Risk level: LOW (metadata only)
+-- Pattern: Add nullable → Backfill in batches → Add default for NEW rows only
+
+BEGIN;
+
+-- Step 1: Add column as nullable, NO default
+-- Instant — no table rewrite, no locking
+ALTER TABLE transactions ADD COLUMN reference_id UUID;
+
+COMMIT;
+```
+
+**Step 2: Batch backfill UUIDs** (separate script, not in migration):
+
+```bash
+# Backfill UUID in batches — no long locks
+./scripts/backfill-uuid.sh 10000
+```
+
+Create `scripts/backfill-uuid.sh`:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+DB_HOST="${DB_HOST:-localhost}"
+DB_PORT="${DB_PORT:-5432}"
+DB_USER="${DB_USER:-tutorial}"
+DB_NAME="${DB_NAME:-app_db}"
+export PGPASSWORD="${DB_PASSWORD:-tutorial_secret}"
+
+PSQL="psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -v ON_ERROR_STOP=1"
+
+BATCH_SIZE="${1:-10000}"
+echo "Backfilling reference_id UUID in batches of $BATCH_SIZE..."
+
+while true; do
+  UPDATED=$($PSQL -tAc "
+    UPDATE transactions
+    SET reference_id = gen_random_uuid()
+    WHERE id IN (
+      SELECT id FROM transactions
+      WHERE reference_id IS NULL
+      LIMIT $BATCH_SIZE
+    )
+    RETURNING 1
+  " | wc -l | tr -d ' ')
+
+  if [ "$UPDATED" -eq 0 ]; then
+    echo "Backfill complete!"
+    break
+  fi
+
+  REMAINING=$($PSQL -tAc "SELECT COUNT(*) FROM transactions WHERE reference_id IS NULL")
+  echo "  Updated $UPDATED rows — $REMAINING remaining"
+done
+```
+
+**Step 3: Add DEFAULT for new rows only** (after backfill):
+
+```sql
+-- Migration: Add default for NEW rows only (existing rows already have UUIDs)
+-- This is safe because the default only applies to future INSERTs
+ALTER TABLE transactions ALTER COLUMN reference_id SET DEFAULT gen_random_uuid();
+
+-- Add NOT NULL (safe — all existing rows already have values)
+ALTER TABLE transactions ALTER COLUMN reference_id SET NOT NULL;
+```
+
+**Why this is safe:**
+- Step 1: `ADD COLUMN` nullable = instant (metadata only)
+- Step 2: Batch UPDATE = only locks 10K rows at a time
+- Step 3: `SET DEFAULT` = metadata only (doesn't touch existing rows)
+
+### Step 6: The SAFE Way — Step 2: Batch Backfill Category
 
 Instead of one massive UPDATE, backfill in **small batches** to avoid long locks.
 
@@ -458,10 +568,24 @@ make down
 
 | Operation | Unsafe | Safe | Lock Duration |
 |-----------|--------|------|---------------|
-| Add column | `ADD COLUMN ... DEFAULT` | `ADD COLUMN` (nullable) | Instant vs minutes |
-| Backfill | `UPDATE ... WHERE all` | Batch UPDATE (10K rows) | 10K rows vs 10M rows |
+| Add nullable column | N/A | `ADD COLUMN` (nullable) | Instant |
+| Add column with constant default | `ADD COLUMN DEFAULT 'x'` | Same (PG 11+ fast default) | Instant |
+| Add column with volatile default | `ADD COLUMN DEFAULT gen_random_uuid()` | Add nullable → batch backfill → set default | 10K rows/batch vs 10M locked |
+| Backfill data | `UPDATE ... WHERE all` | Batch UPDATE (10K rows) | 10K rows vs 10M rows |
 | Add NOT NULL | `ADD NOT NULL` directly | Validate first, then add | Seconds vs minutes |
+| Add CHECK constraint | `ADD CHECK` in same ALTER | Add column → backfill → add constraint separately | Seconds vs minutes |
 | Create index | `CREATE INDEX` | `CREATE INDEX CONCURRENTLY` | None vs minutes |
+
+## When ADD COLUMN is NOT Safe
+
+| Pattern | Why It's Slow | Safe Alternative |
+|---------|---------------|------------------|
+| `DEFAULT gen_random_uuid()` | Volatile → rewrites all rows | Add nullable → batch backfill → set default |
+| `DEFAULT random()` | Volatile → rewrites all rows | Add nullable → batch backfill |
+| `ADD CHECK (expr)` | Scans all rows under lock | Add column → backfill → add constraint separately |
+| `ADD FOREIGN KEY` | Scans + locks both tables | Add column → backfill → add FK separately |
+| `ADD UNIQUE` | Scans + builds index under lock | Add column → backfill → `CREATE UNIQUE INDEX CONCURRENTLY` |
+| `ALTER COLUMN TYPE` | Rewrites + casts all rows | Add new column → backfill → swap in app → drop old |
 
 ## Commands Reference
 
