@@ -548,6 +548,125 @@ curl localhost:3000/api/v2/users/1
 
 ---
 
+# Lab 2: Expand and Contract — DO
+
+<div class="bg-green-500 bg-opacity-10 p-4 rounded">
+
+### ✅ DO: Add new column alongside old one
+
+```sql
+-- Instant, no table rewrite
+ALTER TABLE users ADD COLUMN email_address VARCHAR(255);
+```
+
+### ✅ DO: Copy data to new column
+
+```sql
+-- Backfill existing data
+UPDATE users SET email_address = email;
+```
+
+### ✅ DO: Keep both columns during transition
+
+```sql
+-- Old column still exists → API v1 works
+-- New column has data     → API v2 works
+-- Both APIs return same data, zero downtime
+```
+
+### ✅ DO: Drop old column only after all clients migrated
+
+```sql
+-- Phase 3 (weeks/months later, when API v1 usage = 0)
+ALTER TABLE users DROP COLUMN email;
+```
+
+</div>
+
+---
+
+# Lab 2: Expand and Contract — DON'T
+
+<div class="bg-red-500 bg-opacity-10 p-4 rounded">
+
+### ❌ DON'T: Rename column directly
+
+```sql
+-- Breaks API v1 immediately!
+ALTER TABLE users RENAME COLUMN email TO email_address;
+```
+
+### ❌ DON'T: Drop old column too early
+
+```sql
+-- Clients still using API v1 will break!
+ALTER TABLE users DROP COLUMN email;
+```
+
+### ❌ DON'T: Assume clients update instantly
+
+```
+Mobile app users don't update immediately.
+Some never update. Third-party APIs have
+their own release cycles. You must support
+BOTH API versions during transition.
+```
+
+</div>
+
+---
+
+# Lab 2: Lab 1 vs Lab 2 Comparison
+
+<div class="grid grid-cols-2 gap-4">
+
+<div class="bg-red-500 bg-opacity-10 p-4 rounded">
+
+### Lab 1: Direct Rename
+
+```sql
+RENAME COLUMN email TO email_address
+```
+
+- ✗ API v1 **BROKEN**
+- ✓ API v2 works
+- ✗ 100,000 users locked out
+- ✗ Emergency rollback needed
+- Risk: **HIGH**
+
+</div>
+
+<div class="bg-green-500 bg-opacity-10 p-4 rounded">
+
+### Lab 2: Expand and Contract
+
+```sql
+ADD COLUMN email_address
+UPDATE users SET email_address = email
+```
+
+- ✓ API v1 **works**
+- ✓ API v2 **works**
+- ✓ Zero downtime
+- ✓ No rollback needed
+- Risk: **LOW**
+
+</div>
+
+</div>
+
+<div class="mt-4 bg-blue-500 bg-opacity-10 p-4 rounded text-center">
+
+### The Pattern
+
+**Expand** (add new) → **Migrate** (copy data) → **Contract** (drop old)
+
+Both APIs work during transition. Drop old column only when all clients have migrated.
+
+</div>
+
+---
+
 # Lab 3: Safe DDL on 10M+ Rows — DO
 
 <div class="bg-green-500 bg-opacity-10 p-4 rounded">
