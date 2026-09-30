@@ -1,11 +1,20 @@
-# Lab 3: Risky Changes & Rollback Strategies
+# Lab 3: Safe DDL on Large Tables (10M+ Records)
 
 ## Objective
-Learn how to handle breaking changes safely using multi-step migrations, understand rollback strategies, and practice safe schema evolution patterns.
+Learn how to safely add columns to tables with millions of rows without locking the database or causing downtime. This lab includes a script to generate 10M+ records and demonstrates batch backfilling, concurrent index creation, and safe constraint addition.
+
+## The Challenge
+
+When a table has **COLUMNS, adding a column with a default value or backfilling data can:
+- Lock the table for minutes or hours
+- Block all reads and writes
+- Cause application timeouts
+- Result in production outages
 
 ## Prerequisites
 - Completed Labs 1 and 2
-- Understanding of backward compatibility
+- Docker and Docker Compose installed
+- At least 2GB free disk space (for 10M rows)
 
 ## Step-by-Step Instructions
 
@@ -13,360 +22,456 @@ Learn how to handle breaking changes safely using multi-step migrations, underst
 
 ```bash
 make setup
-make migrate
-make seed
+make migrate MAX_VERSION=003
+make seed TABLES="users products orders order_items"
 ```
 
-### Step 2: Understanding Risky Operations
+### Step 2: Generate 10 Million Records
 
-<div class="bg-red-500 bg-opacity-10 p-4 rounded">
-
-**Risky Operations:**
-- Dropping columns (breaks queries)
-- Renaming columns (breaks applications)
-- Changing column types (may lose data)
-- Adding NOT NULL without default (fails on existing rows)
-- Dropping tables (loses all data)
-
-</div>
-
-### Step 3: Safe Column Rename Pattern (Multi-Step)
-
-Instead of directly renaming, use a 4-step process:
+Use the provided script to generate a large `transactions` table:
 
 ```bash
-make new-migration V=010 DESC=rename_username_step1_add_new
+# Generate 10 million rows (batch size: 50,000)
+./scripts/generate-large-data.sh 10000000 50000
 ```
 
-Edit `migrations/V010__rename_username_step1_add_new.sql`:
-
-```sql
--- Migration: V010 - Step 1 of 4: Add new column
--- Risk level: LOW
--- Backward compatible: YES
--- This is step 1 of a safe column rename
-
-BEGIN;
-
--- Step 1: Add new column (nullable)
-ALTER TABLE users ADD COLUMN display_name VARCHAR(100);
-
--- Step 2 will: Copy data from username to display_name
--- Step 3 will: Update application to use display_name
--- Step 4 will: Drop old username column
-
-COMMIT;
-```
+Or use the make command:
 
 ```bash
-make migrate
-make psql
+make large-data COUNT=10000000
 ```
 
-```sql
--- Step 2: Copy data
-UPDATE users SET display_name = username;
-
--- Verify
-SELECT id, username, display_name FROM users LIMIT 5;
-```
-
-### Step 4: Safe Column Type Change Pattern
+For quick testing, generate 1 million instead:
 
 ```bash
-\q
-make new-migration V=011 DESC=safe_price_precision
-```
-
-Edit `migrations/V011__safe_price_precision.sql`:
-
-```sql
--- Migration: V011 - Increase price precision safely
--- Risk level: MEDIUM
--- Backward compatible: YES (during transition)
--- Rollback strategy: DROP COLUMN new_price; RENAME COLUMN price TO price
-
-BEGIN;
-
--- Step 1: Add new column with desired type
-ALTER TABLE products ADD COLUMN new_price NUMERIC(15,4);
-
--- Step 2: Copy data
-UPDATE products SET new_price = price;
-
--- Step 3: Verify data integrity
--- Run: SELECT COUNT(*) FROM products WHERE price != new_price;
-
--- Step 4: (In next migration) Drop old, rename new
-
-COMMIT;
-```
-
-```bash
-make migrate
-make psql
-```
-
-```sql
--- Verify data was copied correctly
-SELECT id, name, price, new_price
-FROM products
-WHERE price != new_price;
-
--- Should return 0 rows
-```
-
-### Step 5: Rollback Tracking Demo
-
-```bash
-\q
-```
-
-Let's practice rollback tracking:
-
-```bash
-# Check current status
-make status
-
-# Rollback tracking to version 008
-make rollback V=008
-
-# Check status after rollback
-make status
+./scripts/generate-large-data.sh 1000000 50000
 ```
 
 Expected output:
 ```
-Pending migrations:
-  PENDING  V009__add_order_tracking.sql
-  PENDING  V010__rename_username_step1_add_new.sql
-  PENDING  V011__safe_price_precision.sql
+Generating large dataset: 10000000 rows (batch size: 50000)
+
+Table 'transactions' ready.
+Current rows: 0
+Inserting 10000000 more rows in batches of 50000...
+  Batch 1/200 done — 50000/10000000 rows
+  Batch 2/200 done — 100000/10000000 rows
+  ...
+  Batch 200/200 done — 10000000/10000000 rows
+
+Done! Final count:
+ total_rows
+------------
+   10000000
+
+ table_size
+------------
+ 680 MB
 ```
+
+### Step 3: Verify the Large Table
 
 ```bash
-# Re-apply migrations
-make migrate
-
-# Verify everything is back
-make status
-```
-
-### Step 6: Create Rollback Scripts
-
-Create actual rollback SQL for demonstration:
-
-```bash
-mkdir -p rollbacks
-```
-
-Create `rollbacks/V011__rollback.sql`:
-
-```sql
--- Rollback for V011: safe_price_precision
--- This reverses the migration
-
-BEGIN;
-
--- Drop the new column
-ALTER TABLE products DROP COLUMN IF EXISTS new_price;
-
-COMMIT;
-```
-
-Create `rollbacks/V010__rollback.sql`:
-
-```sql
--- Rollback for V010: rename_username_step1_add_new
-
-BEGIN;
-
--- Drop the new column
-ALTER TABLE users DROP COLUMN IF EXISTS display_name;
-
-COMMIT;
-```
-
-### Step 7: Practice with Large Table Simulation
-
-```bash
-make new-migration V=012 DESC=add_products_image_url
-```
-
-Edit `migrations/V012__add_products_image_url.sql`:
-
-```sql
--- Migration: V012 - Add image URL to products
--- Risk level: LOW (small table) / HIGH (if millions of rows)
--- Backward compatible: YES
--- Note: For large tables, consider:
---   1. Using pg_repack for online DDL
---   2. Scheduling during maintenance windows
---   3. Using Bytebase approval workflow
-
-BEGIN;
-
--- Add image URL column (nullable)
-ALTER TABLE products ADD COLUMN image_url VARCHAR(500);
-ALTER TABLE products ADD COLUMN thumbnail_url VARCHAR(500);
-
--- Add sample URLs
-UPDATE products SET
-  image_url = 'https://example.com/images/' || LOWER(REPLACE(name, ' ', '-')) || '.jpg',
-  thumbnail_url = 'https://example.com/images/' || LOWER(REPLACE(name, ' ', '-')) || '-thumb.jpg'
-WHERE image_url IS NULL;
-
-COMMIT;
-```
-
-```bash
-make migrate
 make psql
 ```
 
 ```sql
--- View products with images
-SELECT id, name, price, image_url
-FROM products
-LIMIT 5;
-```
+-- Check table size
+SELECT
+  COUNT(*) AS total_rows,
+  pg_size_pretty(pg_total_relation_size('transactions')) AS total_size
+FROM transactions;
 
-### Step 8: Safe NOT NULL Addition Pattern
+-- Check table structure (no 'category' column yet)
+\d transactions
 
-```bash
+-- Sample data
+SELECT * FROM transactions LIMIT 5;
+
 \q
-make new-migration V=013 DESC=add_product_sku
 ```
 
-Edit `migrations/V013__add_product_sku.sql`:
+### Step 4: The UNSAFE Way (Don't Do This!)
+
+<div class="bg-red-500 bg-opacity-10 p-4 rounded">
+
+### ❌ Unsafe: Single ALTER with Default + UPDATE
 
 ```sql
--- Migration: V013 - Add SKU with safe NOT NULL pattern
--- Risk level: MEDIUM
+-- This locks the table while rewriting all 10M rows!
+ALTER TABLE transactions ADD COLUMN category VARCHAR(50) DEFAULT 'general';
+
+-- This locks the table during the full table scan!
+UPDATE transactions SET category = 'premium' WHERE amount > 500;
+```
+
+**Impact on 10M rows:**
+- Table locked for 2-5 minutes
+- All reads and writes blocked
+- Application timeouts
+- Production outage
+
+</div>
+
+### Step 5: The SAFE Way — Step 1: Add Nullable Column
+
+Adding a **nullable column** is metadata-only in PostgreSQL. It doesn't rewrite the table.
+
+```bash
+make new-migration V=010 DESC=add_category_to_transactions_safe
+```
+
+Edit `migrations/V010__add_category_to_transactions_safe.sql`:
+
+```sql
+-- Migration: V010 - Add category column to transactions (SAFE)
+-- Risk level: LOW (metadata-only change)
+-- Table size: 10M+ rows
 -- Backward compatible: YES
--- Pattern: Add nullable -> Set default -> Add constraint
+-- Pattern: Add nullable column (instant, no table rewrite)
+-- Rollback strategy: ALTER TABLE transactions DROP COLUMN category
 
 BEGIN;
 
--- Step 1: Add as nullable
-ALTER TABLE products ADD COLUMN sku VARCHAR(50);
-
--- Step 2: Set values for existing rows
-UPDATE products SET sku = 'SKU-' || LPAD(id::text, 5, '0');
-
--- Step 3: Add NOT NULL constraint (now safe because all rows have values)
-ALTER TABLE products ALTER COLUMN sku SET NOT NULL;
-
--- Step 4: Add unique constraint
-ALTER TABLE products ADD CONSTRAINT products_sku_unique UNIQUE (sku);
+-- Step 1: Add column as nullable (NO default!)
+-- This is instant — PostgreSQL only updates metadata
+-- No table rewrite, no locking
+ALTER TABLE transactions ADD COLUMN category VARCHAR(50);
 
 COMMIT;
 ```
 
+Apply the migration:
 ```bash
 make migrate
+```
+
+Verify it was instant:
+```bash
 make psql
 ```
 
 ```sql
--- Verify SKU values
-SELECT id, name, sku FROM products ORDER BY id;
+-- Column exists but is NULL for all rows
+SELECT category, COUNT(*) FROM transactions GROUP BY category;
+-- Expected:
+--  category |  count
+-- ----------+----------
+--  (null)   | 10000000
+
+\q
 ```
 
-### Step 9: Create a Breaking Change Example (DO NOT RUN IN PROD)
+**Key point:** Adding a nullable column is instant even on 10M+ rows. PostgreSQL only updates the table metadata.
+
+### Step 6: The SAFE Way — Step 2: Batch Backfill
+
+Instead of one massive UPDATE, backfill in **small batches** to avoid long locks.
+
+Create `scripts/backfill-category.sh`:
 
 ```bash
-\q
-make new-migration V=014 DESC=breaking_change_example
+#!/usr/bin/env bash
+set -euo pipefail
+
+DB_HOST="${DB_HOST:-localhost}"
+DB_PORT="${DB_PORT:-5432}"
+DB_USER="${DB_USER:-tutorial}"
+DB_NAME="${DB_NAME:-app_db}"
+export PGPASSWORD="${DB_PASSWORD:-tutorial_secret}"
+
+PSQL="psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -v ON_ERROR_STOP=1"
+
+BATCH_SIZE="${1:-10000}"
+echo "Backfilling category column in batches of $BATCH_SIZE..."
+
+TOTAL=$($PSQL -tAc "SELECT COUNT(*) FROM transactions WHERE category IS NULL")
+echo "Rows to backfill: $TOTAL"
+
+while true; do
+  UPDATED=$($PSQL -tAc "
+    UPDATE transactions
+    SET category = CASE
+      WHEN amount > 500 THEN 'premium'
+      WHEN amount > 100 THEN 'standard'
+      ELSE 'basic'
+    END
+    WHERE id IN (
+      SELECT id FROM transactions
+      WHERE category IS NULL
+      LIMIT $BATCH_SIZE
+    )
+    RETURNING 1
+  " | wc -l | tr -d ' ')
+
+  if [ "$UPDATED" -eq 0 ]; then
+    echo "Backfill complete!"
+    break
+  fi
+
+  REMAINING=$($PSQL -tAc "SELECT COUNT(*) FROM transactions WHERE category IS NULL")
+  echo "  Updated $UPDATED rows — $REMAINING remaining"
+done
+
+echo ""
+$PSQL -c "SELECT category, COUNT(*) FROM transactions GROUP BY category ORDER BY count+count;"
 ```
 
-Edit `migrations/V014__breaking_change_example.sql`:
+Run the backfill:
+```bash
+chmod +x scripts/backfill-category.sh
+./scripts/backfill-category.sh 10000
+```
+
+Expected output:
+```
+Backfilling category column in batches of 10000...
+Rows to backfill: 10000000
+  Updated 10000 rows — 9990000 remaining
+  Updated 10000 rows — 9980000 remaining
+  ...
+  Updated 10000 rows — 0 remaining
+Backfill complete!
+
+ category |  count
+----------+---------
+ basic    | 3328765
+ premium  | 3337421
+ standard | 3333814
+```
+
+**Why this is safe:**
+- Each batch only locks 10,000 rows (not the whole table)
+- Other queries can read/write during backfill
+- If interrupted, just re-run the script (idempotent)
+- No long-running transaction
+
+### Step 7: The SAFE Way — Step 3: Add NOT NULL Constraint
+
+After backfilling, add the NOT NULL constraint safely.
+
+```bash
+make new-migration V=011 DESC=add_category_not_null_safe
+```
+
+Edit `migrations/V011__add_category_not_null_safe.sql`:
 
 ```sql
--- Migration: V014 - BREAKING CHANGE EXAMPLE
--- Risk level: HIGH
--- Backward compatible: NO
--- WARNING: This migration breaks existing queries!
---
--- This is for EDUCATIONAL PURPOSES ONLY.
--- In production, use the multi-step pattern instead.
---
--- Breaking changes:
--- 1. Drops a column (breaks SELECT *)
--- 2. Renames a column (breaks existing queries)
---
--- SAFE ALTERNATIVE:
--- Instead of dropping, mark as deprecated:
---   ALTER TABLE orders ADD COLUMN deprecated_at TIMESTAMPTZ DEFAULT NOW();
+-- Migration: V011 - Add NOT NULL to category (SAFE)
+-- Risk level: MEDIUM (validates all rows)
+-- Prerequisite: V010 applied + backfill complete
+-- Rollback strategy: ALTER TABLE transactions ALTER COLUMN category DROP NOT NULL
 
--- DO NOT UNCOMMENT IN PRODUCTION
--- ALTER TABLE orders DROP COLUMN status;
--- ALTER TABLE orders RENAME COLUMN total TO amount;
+BEGIN;
 
--- SAFE VERSION: Just add a comment
-SELECT 'This migration is intentionally empty to demonstrate breaking change risks' AS message;
+-- Verify no NULL values remain before adding constraint
+DO $$
+DECLARE
+  null_count INTEGER;
+BEGIN
+  SELECT COUNT(*) INTO null_count FROM transactions WHERE category IS NULL;
+  IF null_count > 0 THEN
+    RAISE EXCEPTION 'Cannot add NOT NULL: % rows still have NULL category', null_count;
+  END IF;
+END $$;
+
+-- Safe to add NOT NULL (all rows have values)
+ALTER TABLE transactions ALTER COLUMN category SET NOT NULL;
 
 COMMIT;
 ```
 
-### Step 10: Verify All Migrations
+Apply the migration:
+```bash
+make migrate
+```
+
+### Step 8: The SAFE Way — Step 4: Create Index Concurrently
+
+Creating an index normally locks the table for writes. Use `CONCURRENTLY` to avoid locking.
 
 ```bash
-make status
+make new-migration V=012 DESC=add_category_index_concurrently
 ```
+
+Edit `migrations/V012__add_category_index_concurrently.sql`:
+
+```sql
+-- Migration: V012 - Create index on category (SAFE)
+-- Risk level: LOW (concurrent, no locking)
+-- Note: CREATE INDEX CONCURRENTLY cannot run inside a transaction block
+
+-- Don't use BEGIN/COMMIT with CONCURRENTLY!
+CREATE INDEX CONCURRENTLY idx_transactions_category ON transactions(category);
+
+-- Create partial index for premium transactions (common query)
+CREATE INDEX CONCURRENTLY idx_transactions_premium
+  ON transactions(created_at)
+  WHERE category = 'premium';
+```
+
+Apply the migration:
+```bash
+make migrate
+```
+
+Verify the indexes:
+```bash
+make psql
+```
+
+```sql
+-- Check indexes
+\d transactions
+
+-- Test query performance
+EXPLAIN ANALYZE
+SELECT * FROM transactions WHERE category = 'premium' LIMIT 10;
+
+\q
+```
+
+### Step 9: Test API with Large Table
+
+Add a transactions endpoint to the API. Edit `api/server.js` and add:
+
+```javascript
+// Get transactions by category
+app.get('/api/v1/transactions/category/:category', async (req, res) => {
+  try {
+    const { category } = req.params;
+    const result = await pool.query(
+      'SELECT id, user_id, amount, status, category, created_at FROM transactions WHERE category = $1 ORDER BY id LIMIT 20',
+      [category]
+    );
+
+    res.json({
+      success: true,
+      version: 'v1',
+      count: result.rows.length,
+      data: result.rows
+    });
+  } catch (error) {
+    console.error('Error fetching transactions:', error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+```
+
+Restart the API and test:
+```bash
+make api-start
+
+# In another terminal
+curl http://localhost:3000/api/v1/transactions/category/premium
+```
+
+### Step 10: Verify the Complete Safe Migration
 
 ```bash
 make psql
 ```
 
 ```sql
--- Check all tables
-\dt
+-- Final table structure
+\d transactions
 
--- Check migration history
-SELECT version, filename, applied_at
-FROM _schema_migrations
-ORDER BY version;
+-- Data distribution
+SELECT category, COUNT(*) AS count
+FROM transactions
+GROUP BY category
+ORDER BY count DESC;
 
--- Verify data integrity
-SELECT 'users' AS table_name, COUNT(*) AS count FROM users
-UNION ALL
-SELECT 'products', COUNT(*) FROM products
-UNION ALL
-SELECT 'orders', COUNT(*) FROM orders
-UNION ALL
-SELECT 'order_items', COUNT(*) FROM order_items
-UNION ALL
-SELECT 'categories', COUNT(*) FROM categories
-UNION ALL
-SELECT 'user_preferences', COUNT(*) FROM user_preferences
-ORDER BY table_name;
+-- Table and index sizes
+SELECT
+  relname AS object,
+  pg_size_pretty(pg_total_relation_size(relid)) AS size
+FROM pg_catalog.pg_statio_user_tables
+WHERE relname = 'transactions';
+
+-- Migration history
+SELECT version, filename FROM _schema_migrations ORDER BY version;
+
+\q
+```
+
+### Step 11: Clean Up
+
+```bash
+# Stop API (Ctrl+C)
+make down
+```
+
+## Summary: Safe DDL on Large Tables
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│  SAFE DDL ON 10M+ ROW TABLE                                        │
+├────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  Step 1: ADD nullable column (instant)                             │
+│  ┌──────────────────────────────────────────────┐                  │
+│  │ ALTER TABLE transactions                     │                  │
+│  │   ADD COLUMN category VARCHAR(50);           │                  │
+│  │ ✓ Metadata only — no table rewrite           │                  │
+│  │ ✓ Instant even on 10M rows                   │                  │
+│  └──────────────────────────────────────────────┘                  │
+│                      ↓                                             │
+│  Step 2: BATCH BACKFILL (no long locks)                           │
+│  ┌──────────────────────────────────────────────┐                  │
+│  │ UPDATE ... WHERE id IN (                     │                  │
+│  │   SELECT id ... LIMIT 10000                  │                  │
+│  │ )                                            │                  │
+│  │ ✓ Only locks 10K rows per batch              │                  │
+│  │ ✓ Table remains readable/writable            │                  │
+│  │ ✓ Idempotent — can resume if interrupted     │                  │
+│  └──────────────────────────────────────────────┘                  │
+│                      ↓                                             │
+│  Step 3: ADD NOT NULL constraint (after backfill)                  │
+│  ┌──────────────────────────────────────────────┐                  │
+│  │ ALTER TABLE transactions                     │                  │
+│  │   ALTER COLUMN category SET NOT NULL;        │                  │
+│  │ ✓ Validates all rows have values             │                  │
+│  │ ✓ Quick scan, no rewrite                     │                  │
+│  └──────────────────────────────────────────────┘                  │
+│                      ↓                                             │
+│  Step 4: CREATE INDEX CONCURRENTLY (no write locks)               │
+│  ┌──────────────────────────────────────────────┐                  │
+│  │ CREATE INDEX CONCURRENTLY                    │                  │
+│  │   idx_cat ON transactions(category);         │                  │
+│  │ ✓ No blocking — table stays writable         │                  │
+│  │ ✓ Takes longer but zero downtime             │                  │
+│  └──────────────────────────────────────────────┘                  │
+│                                                                     │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Key Takeaways
 
-1. **Never drop columns directly** - use multi-step rename pattern
-2. **For type changes** - add new column, copy data, then swap
-3. **For NOT NULL** - add nullable, populate, then add constraint
-4. **Track rollbacks** - maintain rollback scripts
-5. **Large tables** - require special handling (pg_repack, maintenance windows)
+1. **Adding nullable columns is instant** — PostgreSQL only updates metadata
+2. **Never backfill in one UPDATE** — Use batches of 10K-50K rows
+3. **Use CREATE INDEX CONCURRENTLY** — Avoids write locks during index creation
+4. **Validate before NOT NULL** — Check for NULLs before adding constraint
+5. **Each step is separately deployable** — No single massive migration
 
-## Safe Migration Patterns
+## Unsafe vs Safe Comparison
 
-| Operation | Unsafe | Safe Pattern |
-|-----------|--------|--------------|
-| Rename column | `RENAME COLUMN` | Add new → Copy → Update app → Drop old |
-| Change type | `ALTER TYPE` | Add new → Copy → Update app → Drop old |
-| Add NOT NULL | `ADD NOT NULL` | Add nullable → Populate → Add constraint |
-| Drop column | `DROP COLUMN` | Mark deprecated → Update app → Drop later |
+| Operation | Unsafe | Safe | Lock Duration |
+|-----------|--------|------|---------------|
+| Add column | `ADD COLUMN ... DEFAULT` | `ADD COLUMN` (nullable) | Instant vs minutes |
+| Backfill | `UPDATE ... WHERE all` | Batch UPDATE (10K rows) | 10K rows vs 10M rows |
+| Add NOT NULL | `ADD NOT NULL` directly | Validate first, then add | Seconds vs minutes |
+| Create index | `CREATE INDEX` | `CREATE INDEX CONCURRENTLY` | None vs minutes |
 
-## Rollback Checklist
+## Commands Reference
 
-- [ ] Create rollback script for each migration
-- [ ] Test rollback in staging environment
-- [ ] Document data loss implications
-- [ ] Plan for application compatibility
-- [ ] Schedule during maintenance windows
+| Command | Description |
+|---------|-------------|
+| `./scripts/generate-large-data.sh 10000000 50000` | Generate 10M rows |
+| `./scripts/backfill-category.sh 10000` | Backfill in batches |
+| `make migrate` | Apply migrations |
+| `make psql` | Open database shell |
 
 ## Next Steps
 
-Proceed to **Lab 4** to learn about Bytebase risk management and approval workflows.
+Proceed to **Lab 4** to learn about Bytebase risk management and approval workflows for large table changes.

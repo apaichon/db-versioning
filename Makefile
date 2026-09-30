@@ -1,4 +1,4 @@
-.PHONY: help setup down migrate status rollback new-migration seed drop-tables bytebase slides lab1 lab2 lab3 lab4 clean reset api-install api-start api-test
+.PHONY: help setup down migrate status rollback new-migration seed drop-tables large-data backfill bytebase slides lab1 lab2 lab3 lab4 clean reset api-install api-start api-test
 
 help:
 	@echo "Database Version Control Tutorial - Available Commands"
@@ -34,6 +34,10 @@ help:
 	@echo "  make api-install     - Install API dependencies"
 	@echo "  make api-start       - Start API server (http://localhost:3000)"
 	@echo "  make api-test        - Test API endpoints"
+	@echo ""
+	@echo "LARGE DATA (Lab 3):"
+	@echo "  make large-data COUNT=10000000 - Generate large dataset"
+	@echo "  make backfill BATCH=10000      - Backfill column in batches"
 	@echo ""
 
 setup:
@@ -136,6 +140,14 @@ api-test:
 	@echo "GET /api/v1/users"
 	@curl -s http://localhost:3000/api/v1/users | jq .
 
+large-data:
+	@echo "Generating large dataset..."
+	./scripts/generate-large-data.sh $(or $(COUNT),1000000) 50000
+
+backfill:
+	@echo "Backfilling category column in batches..."
+	./scripts/backfill-category.sh $(or $(BATCH),10000)
+
 lab1:
 	@echo "=========================================="
 	@echo "Lab 1: Migration-Driven API Evolution"
@@ -177,17 +189,20 @@ lab2:
 
 lab3:
 	@echo "=========================================="
-	@echo "Lab 3: Risky Changes & Rollback"
+	@echo "Lab 3: Safe DDL on Large Tables (10M+)"
 	@echo "=========================================="
 	@echo ""
 	@echo "Full instructions: labs/lab3-risky-changes.md"
 	@echo ""
 	@echo "Quick Start:"
-	@echo "  1. make setup && make migrate && make seed"
-	@echo "  2. make status"
-	@echo "  3. make rollback V=004"
-	@echo "  4. make status"
-	@echo "  5. make migrate"
+	@echo "  1. make setup                    # Start PostgreSQL"
+	@echo "  2. make migrate MAX_VERSION=003  # Apply V001-V003"
+	@echo "  3. make large-data COUNT=1000000 # Generate 1M rows"
+	@echo "  4. make new-migration V=010 DESC=add_category_to_transactions_safe"
+	@echo "  5. Edit migration: ADD COLUMN category (nullable)"
+	@echo "  6. make migrate                  # Instant, no lock"
+	@echo "  7. make backfill BATCH=10000     # Backfill in batches"
+	@echo "  8. Add NOT NULL + CREATE INDEX CONCURRENTLY"
 	@echo ""
 	@echo "Run 'cat labs/lab3-risky-changes.md' for full instructions"
 	@echo ""
