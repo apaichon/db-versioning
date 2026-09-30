@@ -1,4 +1,4 @@
-.PHONY: help setup down migrate status rollback new-migration seed bytebase slides lab1 lab2 lab3 lab4 clean reset
+.PHONY: help setup down migrate status rollback new-migration seed drop-tables bytebase slides lab1 lab2 lab3 lab4 clean reset
 
 help:
 	@echo "Database Version Control Tutorial - Available Commands"
@@ -13,6 +13,7 @@ help:
 	@echo "  make migrate         - Apply all pending migrations"
 	@echo "  make status          - Show migration status"
 	@echo "  make seed            - Insert sample data (users, products, orders)"
+	@echo "  make drop-tables     - Drop all tables (destructive!)"
 	@echo "  make rollback V=004  - Rollback to specific version"
 	@echo "  make new-migration V=007 DESC=add_payment_methods"
 	@echo ""
@@ -64,6 +65,11 @@ status:
 seed:
 	@echo "Seeding database with sample data..."
 	./scripts/seed-data.sh
+
+drop-tables:
+	@echo "WARNING: This will drop ALL tables in the database!"
+	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
+	./scripts/drop-tables.sh
 
 rollback:
 	@if [ -z "$(V)" ]; then \
