@@ -1,0 +1,15 @@
+{
+    "sqltools.connections": [
+        {
+            "ssh": "Disabled",
+            "previewLimit": 50,
+            "server": "localhost",
+            "port": 5432,
+            "driver": "PostgreSQL",
+            "name": "db_versioning",
+            "database": "app_db",
+            "username": "tutorial",
+            "password": "tutorial_secret"
+        }
+    ]
+}

@@ -137,44 +137,32 @@ curl http://localhost:3000/api/v1/users/1
 curl http://localhost:3000/api/v1/users
 ```
 
-### Step 4: Rename Email Column & Create API v2
+### Step 4: Rename Email Column (BREAKING CHANGE)
 
-Now let's evolve the schema. We want to rename `email` to `email_address` for clarity.
+Now let's see what happens when we rename a column. This demonstrates why we need safe migration patterns.
 
-**Create migration for column rename (safe pattern):**
+**Create migration for column rename:**
 
 ```bash
 # Go back to project root
 cd ..
 
 # Create migration
-make new-migration V=007 DESC=rename_email_to_email_address
+make new-migration V=007 DESC=rename_email_column
 ```
 
-Edit `migrations/V007__rename_email_to_email_address.sql`:
+Edit `migrations/V007__rename_email_column.sql`:
 
 ```sql
 -- Migration: V007 - Rename email to email_address
--- Risk level: MEDIUM
--- Backward compatible: YES (using multi-step pattern)
--- Rollback strategy: Reverse the rename
+-- Risk level: HIGH (BREAKING CHANGE)
+-- Backward compatible: NO
+-- Impact: API v1 will break, only API v2 will work
 
 BEGIN;
 
--- Step 1: Add new column
-ALTER TABLE users ADD COLUMN email_address VARCHAR(255);
-
--- Step 2: Copy data from old column
-UPDATE users SET email_address = email;
-
--- Step 3: Add unique constraint to new column
-ALTER TABLE users ADD CONSTRAINT users_email_address_unique UNIQUE (email_address);
-
--- Note: In a real scenario, you would:
--- 1. Deploy this migration
--- 2. Update application to use email_address
--- 3. Deploy application
--- 4. In next migration, drop old email column
+-- Rename the column (this breaks existing queries!)
+ALTER TABLE users RENAME COLUMN email TO email_address;
 
 COMMIT;
 ```
@@ -184,71 +172,29 @@ Apply migration:
 make migrate
 ```
 
-Verify:
+Verify the column was renamed:
 ```bash
 make psql
 ```
 
 ```sql
 \d users
--- Should see both email and email_address columns
+-- Should see: email_address (NOT email)
 
-SELECT id, email, email_address, username FROM users LIMIT 3;
--- Both columns should have the same data
+SELECT id, email_address, username FROM users LIMIT 3;
+-- This works
+
+SELECT id, email, username FROM users LIMIT 3;
+-- ERROR: column "email" does not exist
 
 \q
 ```
 
-**Update API to add v2:**
+**Update API to v2 (uses new column name):**
 
-Edit `api/server.js` and add v2 endpoints:
-
-```javascript
-// Add these routes BEFORE the v1 routes
-
-// API v2: Get user profile (uses email_address)
-app.get('/api/v2/users/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await pool.query(
-      'SELECT id, email_address AS email, username, created_at FROM users WHERE id = $1',
-      [id]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    res.json({
-      success: true,
-      version: 'v2',
-      data: result.rows[0]
-    });
-  } catch (error) {
-    console.error('Error fetching user:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Get all users (v2)
-app.get('/api/v2/users', async (req, res) => {
-  try {
-    const result = await pool.query(
-      'SELECT id, email_address AS email, username, created_at FROM users ORDER BY id LIMIT 10'
-    );
-
-    res.json({
-      success: true,
-      version: 'v2',
-      count: result.rows.length,
-      data: result.rows
-    });
-  } catch (error) {
-    console.error('Error fetching users:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-```
+The `api/server.js` already has both v1 and v2 endpoints. After the migration:
+- v1 queries `email` column → FAILS
+- v2 queries `email_address` column → WORKS
 
 Restart the API:
 ```bash
@@ -256,29 +202,23 @@ Restart the API:
 node server.js
 ```
 
-### Step 5: Test Both APIs (v1 and v2)
+### Step 5: Test API v2 (v1 is now broken)
 
-Test API v1 (still uses old `email` column):
+Test API v1 (should FAIL):
 ```bash
-# Get user v1
+# This will fail because column "email" no longer exists
 curl http://localhost:3000/api/v1/users/1
 
-# Expected:
+# Expected error:
 # {
-#   "success": true,
-#   "data": {
-#     "id": 1,
-#     "email": "john.doe@example.com",
-#     "username": "johndoe",
-#     "created_at": "2026-09-30T10:00:00.000Z"
-#   }
+#   "error": "Internal server error - column may not exist"
 # }
-
-# Get all users v1
-curl http://localhost:3000/api/v1/users
+# 
+# Server logs show:
+# Error fetching user (v1): column "email" does not exist
 ```
 
-Test API v2 (uses new `email_address` column):
+Test API v2 (should WORK):
 ```bash
 # Get user v2
 curl http://localhost:3000/api/v2/users/1
@@ -289,7 +229,7 @@ curl http://localhost:3000/api/v2/users/1
 #   "version": "v2",
 #   "data": {
 #     "id": 1,
-#     "email": "john.doe@example.com",
+#     "email_address": "john.doe@example.com",
 #     "username": "johndoe",
 #     "created_at": "2026-09-30T10:00:00.000Z"
 #   }
@@ -299,9 +239,9 @@ curl http://localhost:3000/api/v2/users/1
 curl http://localhost:3000/api/v2/users
 ```
 
-Both APIs should return the same data, but v2 uses the new column internally.
+**Key Lesson:** The column rename broke API v1 immediately. This is why we need safe migration patterns!
 
-### Step 6: Verify Schema Evolution
+### Step 6: Verify Schema Change
 
 ```bash
 make psql
@@ -313,21 +253,14 @@ SELECT version, filename, applied_at
 FROM _schema_migrations
 ORDER BY version;
 
--- Verify both columns exist
+-- Verify column was renamed
 SELECT column_name, data_type, is_nullable
 FROM information_schema.columns
 WHERE table_name = 'users'
   AND column_name IN ('email', 'email_address')
 ORDER BY column_name;
 
--- Check data integrity
-SELECT
-  id,
-  email,
-  email_address,
-  (email = email_address) AS data_matches
-FROM users
-LIMIT 5;
+-- Should only see 'email_address', NOT 'email'
 
 \q
 ```
@@ -343,27 +276,23 @@ make down
 
 ## Key Takeaways
 
-1. **Migrations drive schema evolution** - Each migration represents a controlled change
-2. **Safe column rename pattern** - Add new → Copy data → Update app → Drop old
-3. **API versioning** - v1 and v2 can coexist during transition
-4. **Backward compatibility** - Old clients continue working with v1
-5. **Data integrity** - Both columns have the same data during transition
+1. **Column renames are BREAKING CHANGES** - They immediately break existing queries
+2. **API v1 broke** - Because it queried the old column name `email`
+3. **API v2 works** - Because it queries the new column name `email_address`
+4. **This is dangerous in production** - You need safe migration patterns
+5. **Next lab** - Learn the safe way to rename columns without breaking changes
 
 ## Schema Evolution Timeline
 
 ```
 Initial State (V001-V003):
   users table: id, email, username, password, created_at, updated_at
+  API v1: SELECT id, email, username FROM users ✓ WORKS
 
-After V007 Migration:
-  users table: id, email, email_address, username, password, created_at, updated_at
-
-API v1: SELECT id, email, username FROM users
-API v2: SELECT id, email_address AS email, username FROM users
-
-Next Migration (future):
-  - Drop old email column
-  - Remove v1 API endpoints
+After V007 Migration (BREAKING CHANGE):
+  users table: id, email_address, username, password, created_at, updated_at
+  API v1: SELECT id, email, username FROM users ✗ FAILS
+  API v2: SELECT id, email_address, username FROM users ✓ WORKS
 ```
 
 ## Common Commands
