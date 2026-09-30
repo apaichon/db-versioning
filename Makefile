@@ -1,4 +1,4 @@
-.PHONY: help setup down migrate status rollback new-migration seed drop-tables bytebase slides lab1 lab2 lab3 lab4 clean reset
+.PHONY: help setup down migrate status rollback new-migration seed drop-tables bytebase slides lab1 lab2 lab3 lab4 clean reset api-install api-start api-test
 
 help:
 	@echo "Database Version Control Tutorial - Available Commands"
@@ -29,6 +29,11 @@ help:
 	@echo "  make bytebase        - Open Bytebase UI (http://localhost:8080)"
 	@echo "  make slides          - Start Slidev presentation"
 	@echo "  make psql            - Open PostgreSQL shell"
+	@echo ""
+	@echo "API COMMANDS (Lab 1):"
+	@echo "  make api-install     - Install API dependencies"
+	@echo "  make api-start       - Start API server (http://localhost:3000)"
+	@echo "  make api-test        - Test API endpoints"
 	@echo ""
 
 setup:
@@ -111,23 +116,40 @@ slides:
 	@echo "Starting Slidev presentation..."
 	npm run dev
 
+api-install:
+	@echo "Installing API dependencies..."
+	cd api && npm install --cache /tmp/npm-cache
+	@echo "API dependencies installed."
+
+api-start:
+	@echo "Starting API server..."
+	@echo "API will be available at http://localhost:3000"
+	@echo "Press Ctrl+C to stop"
+	cd api && node server.js
+
+api-test:
+	@echo "Testing API endpoints..."
+	@echo ""
+	@echo "GET /api/v1/users/1"
+	@curl -s http://localhost:3000/api/v1/users/1 | jq .
+	@echo ""
+	@echo "GET /api/v1/users"
+	@curl -s http://localhost:3000/api/v1/users | jq .
+
 lab1:
 	@echo "=========================================="
-	@echo "Lab 1: Basic Migration Workflow (V001-V003)"
+	@echo "Lab 1: Migration-Driven API Evolution"
 	@echo "=========================================="
 	@echo ""
 	@echo "Full instructions: labs/lab1-basic-migrations.md"
 	@echo ""
 	@echo "Quick Start:"
-	@echo "  1. make setup          # Start PostgreSQL and Bytebase"
-	@echo "  2. make status         # Check migration status"
-	@echo "  3. make migrate        # Apply all migrations"
-	@echo "  4. make seed           # Insert sample data"
-	@echo "  5. make psql           # Connect to database"
-	@echo "     \\dt                 # List tables"
-	@echo "     SELECT * FROM users LIMIT 5;"
-	@echo "     \\q                  # Quit"
-	@echo "  6. make down           # Stop containers"
+	@echo "  1. make setup                    # Start PostgreSQL"
+	@echo "  2. make migrate MAX_VERSION=003  # Apply V001-V003 only"
+	@echo "  3. make seed TABLES='users products orders order_items'"
+	@echo "  4. make api-install              # Install API dependencies"
+	@echo "  5. make api-start                # Start API server"
+	@echo "  6. make api-test                 # Test API (in another terminal)"
 	@echo ""
 	@echo "Run 'cat labs/lab1-basic-migrations.md' for full instructions"
 	@echo ""
