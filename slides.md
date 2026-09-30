@@ -212,6 +212,8 @@ ALTER TABLE users ADD COLUMN is_active  BOOLEAN NOT NULL DEFAULT TRUE;
 </div>
 
 ---
+class: overflow-scroll
+---
 
 # Example 2: Audit Trail
 
@@ -314,6 +316,8 @@ class: text-center
 
 A real-world scenario: what happens when you rename a database column in production?
 
+---
+class: overflow-scroll
 ---
 
 # Lab 1: The Setup
