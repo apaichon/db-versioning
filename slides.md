@@ -217,6 +217,8 @@ class: overflow-scroll
 
 # Example 2: Audit Trail
 
+<div style="max-height: 380px; overflow-y: auto; padding-right: 8px;">
+
 <div class="bg-blue-500 bg-opacity-10 p-4 rounded">
 
 ### V005__create_audit_log.sql
@@ -244,6 +246,8 @@ CREATE TABLE audit_log (
 - Full audit trail for compliance (SOC 2, GDPR)
 - JSONB allows flexible schema for any table
 - Foreign key to users for accountability
+
+</div>
 
 </div>
 
