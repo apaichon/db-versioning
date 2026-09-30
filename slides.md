@@ -548,6 +548,132 @@ curl localhost:3000/api/v2/users/1
 
 ---
 
+# Lab 3: Safe DDL on 10M+ Rows — DO
+
+<div class="bg-green-500 bg-opacity-10 p-4 rounded">
+
+### ✅ DO: Add nullable column (no default)
+
+```sql
+-- Instant — metadata only, no table rewrite
+ALTER TABLE transactions ADD COLUMN category VARCHAR(50);
+```
+
+### ✅ DO: Backfill in batches
+
+```sql
+-- Only locks 10K rows, table stays readable
+UPDATE transactions SET category = 'premium'
+WHERE id IN (SELECT id FROM transactions
+  WHERE category IS NULL LIMIT 10000);
+```
+
+### ✅ DO: Create index concurrently
+
+```sql
+-- No write locks during index build
+CREATE INDEX CONCURRENTLY idx_cat ON transactions(category);
+```
+
+### ✅ DO: Set default AFTER backfill
+
+```sql
+-- Only affects new INSERTs, not existing rows
+ALTER TABLE transactions ALTER COLUMN reference_id
+  SET DEFAULT gen_random_uuid();
+```
+
+</div>
+
+---
+
+# Lab 3: Safe DDL on 10M+ Rows — DON'T
+
+<div class="bg-red-500 bg-opacity-10 p-4 rounded">
+
+### ❌ DON'T: Add column with volatile default
+
+```sql
+-- Rewrites ALL 10M rows! Table locked for minutes.
+ALTER TABLE transactions
+  ADD COLUMN reference_id UUID DEFAULT gen_random_uuid();
+```
+
+### ❌ DON'T: Backfill in one UPDATE
+
+```sql
+-- Locks entire table for minutes
+UPDATE transactions SET category = 'premium' WHERE amount > 500;
+```
+
+### ❌ DON'T: Add CHECK/UNIQUE in same ALTER
+
+```sql
+-- Full table scan under lock
+ALTER TABLE transactions ADD COLUMN score INT DEFAULT 0,
+  ADD CONSTRAINT score_check CHECK (score >= 0);
+```
+
+### ❌ DON'T: Create index without CONCURRENTLY
+
+```sql
+-- Blocks all writes during index build
+CREATE INDEX idx_cat ON transactions(category);
+```
+
+</div>
+
+---
+
+# Lab 3: Summary — Safe vs Unsafe
+
+<div class="grid grid-cols-2 gap-4">
+
+<div class="bg-red-500 bg-opacity-10 p-4 rounded">
+
+### ❌ Unsafe (locks 10M rows)
+
+| Operation | Lock Time |
+|-----------|-----------|
+| `DEFAULT gen_random_uuid()` | 3-10 min |
+| `DEFAULT random()` | 3-10 min |
+| `ADD CHECK` in ALTER | 1-5 min |
+| `ADD FOREIGN KEY` | 1-5 min |
+| `ADD UNIQUE` | 2-10 min |
+| `CREATE INDEX` | 2-10 min |
+| `UPDATE ... all rows` | 2-10 min |
+
+</div>
+
+<div class="bg-green-500 bg-opacity-10 p-4 rounded">
+
+### ✅ Safe (no long locks)
+
+| Operation | Lock Time |
+|-----------|-----------|
+| `ADD COLUMN` nullable | Instant |
+| Batch UPDATE 10K | 10K rows |
+| `SET DEFAULT` after backfill | Instant |
+| `CREATE INDEX CONCURRENTLY` | None |
+| `SET NOT NULL` after backfill | Seconds |
+| Add constraint separately | Seconds |
+
+</div>
+
+</div>
+
+<div class="mt-4 bg-blue-500 bg-opacity-10 p-4 rounded text-center">
+
+### Key Rule
+
+**Add column nullable → Backfill in batches → Add constraints/indexes separately**
+
+Each step is independently deployable with zero downtime.
+
+</div>
+
+---
+
 # Running Migrations
 
 <div class="grid grid-cols-2 gap-6">
