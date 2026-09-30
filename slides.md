@@ -304,6 +304,241 @@ ALTER TABLE orders ADD COLUMN notes TEXT;
 </div>
 
 ---
+layout: center
+class: text-center
+---
+
+# Lab 1 Showcase
+
+## Breaking API Compatibility with Column Rename
+
+A real-world scenario: what happens when you rename a database column in production?
+
+---
+
+# Lab 1: The Setup
+
+<div class="grid grid-cols-2 gap-6">
+
+<div class="bg-blue-500 bg-opacity-10 p-4 rounded">
+
+### Your Production System
+
+- **Mobile app v1.0** — 100,000 users → calls `/api/v1/users`
+- **Mobile app v2.0** — 10,000 users → calls `/api/v2/users`
+- **Web dashboard** → calls `/api/v1/users`
+- **Third-party integrations** → calls `/api/v1/users`
+
+</div>
+
+<div class="bg-green-500 bg-opacity-10 p-4 rounded">
+
+### Database Schema (V001-V003)
+
+```sql
+CREATE TABLE users (
+    id         BIGSERIAL PRIMARY KEY,
+    email      VARCHAR(255) NOT NULL UNIQUE,
+    username   VARCHAR(100) NOT NULL,
+    password   VARCHAR(255) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+</div>
+
+</div>
+
+<div class="mt-4 bg-gray-500 bg-opacity-10 p-4 rounded">
+
+### API v1 Code (Current Production)
+
+```javascript
+app.get('/api/v1/users/:id', async (req, res) => {
+  const result = await pool.query(
+    'SELECT id, email, username, created_at FROM users WHERE id = $1', [id]
+  );
+  res.json({ success: true, data: result.rows[0] });
+});
+```
+
+**All clients depend on this. It works perfectly.**
+
+</div>
+
+---
+
+# Lab 1: The Breaking Change
+
+<div class="bg-red-500 bg-opacity-10 p-4 rounded">
+
+### V007 Migration: Rename Column
+
+```sql
+-- Risk level: HIGH (BREAKING CHANGE)
+ALTER TABLE users RENAME COLUMN email TO email_address;
+```
+
+</div>
+
+<div class="grid grid-cols-2 gap-6 mt-4">
+
+<div class="bg-red-500 bg-opacity-10 p-4 rounded">
+
+### API v1 — BROKEN
+
+```javascript
+'SELECT id, email, username FROM users'
+```
+
+```json
+{
+  "error": "column \"email\" does not exist"
+}
+```
+
+**100,000 users locked out**
+
+</div>
+
+<div class="bg-green-500 bg-opacity-10 p-4 rounded">
+
+### API v2 — WORKS
+
+```javascript
+'SELECT id, email_address, username FROM users'
+```
+
+```json
+{
+  "success": true,
+  "version": "v2",
+  "data": { "id": 1, "email_address": "john@example.com" }
+}
+```
+
+**Only 10,000 users benefit**
+
+</div>
+
+</div>
+
+---
+
+# Lab 1: The Real-World Impact
+
+<div class="grid grid-cols-3 gap-4">
+
+<div class="bg-red-500 bg-opacity-20 p-4 rounded text-center">
+
+### Mobile App v1.0
+
+**100,000 users**
+
+Cannot log in.
+Users don't update apps immediately.
+Some never update.
+
+</div>
+
+<div class="bg-red-500 bg-opacity-20 p-4 rounded text-center">
+
+### Web Dashboard
+
+**Internal team**
+
+Shows errors.
+Needs emergency deploy.
+Takes days to fix.
+
+</div>
+
+<div class="bg-red-500 bg-opacity-20 p-4 rounded text-center">
+
+### Third-Party APIs
+
+**External partners**
+
+Have own release cycles.
+Cannot force updates.
+Some stay on v1 forever.
+
+</div>
+
+</div>
+
+<div class="mt-6 bg-orange-500 bg-opacity-10 p-4 rounded">
+
+### The Timeline Problem
+
+```
+Day 1:   Column renamed → 90% of users locked out
+Day 30:  80k users still on old app → still broken
+Day 90:  20k users never update → must support BOTH versions
+```
+
+**You can't break old API versions until ALL clients have migrated.**
+
+</div>
+
+---
+
+# Lab 1: Commands Used
+
+<div class="grid grid-cols-2 gap-6">
+
+<div>
+
+### Step-by-Step
+
+```bash
+# 1. Start PostgreSQL
+make setup
+
+# 2. Apply only V001-V003
+make migrate MAX_VERSION=003
+
+# 3. Seed data for core tables
+make seed TABLES="users products orders order_items"
+
+# 4. Install & start API
+make api-install
+make api-start
+```
+
+</div>
+
+<div>
+
+### Then the Breaking Change
+
+```bash
+# 5. Apply V007 (rename column)
+make migrate
+
+# 6. Test API v1 → FAILS
+curl localhost:3000/api/v1/users/1
+# {"error": "column may not exist"}
+
+# 7. Test API v2 → WORKS
+curl localhost:3000/api/v2/users/1
+# {"success": true, "version": "v2"}
+```
+
+</div>
+
+</div>
+
+<div class="mt-4 bg-yellow-500 bg-opacity-10 p-4 rounded text-center">
+
+### Lesson Learned
+
+**Column renames are breaking changes.** Lab 2 teaches the safe "Expand and Contract" pattern to rename columns with zero downtime.
+
+</div>
+
+---
 
 # Running Migrations
 
