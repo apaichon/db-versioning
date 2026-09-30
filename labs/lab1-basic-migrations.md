@@ -20,11 +20,12 @@ make setup
 make status
 
 # Apply only V001-V003 (core tables)
-./scripts/migrate.sh migrate
+make migrate MAX_VERSION=003
 ```
 
 Expected output:
 ```
+Applying migrations up to V003...
   APPLY V001__create_users_table.sql ...
   APPLY V002__create_orders_table.sql ...
   APPLY V003__create_products_table.sql ...

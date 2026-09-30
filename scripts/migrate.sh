@@ -27,6 +27,7 @@ compute_checksum() {
 }
 
 migrate() {
+  local max_version="${1:-}"
   ensure_tracking_table
   local applied=0
 
@@ -38,6 +39,12 @@ migrate() {
     version="$(echo "$filename" | sed -E 's/^V([0-9]+)__.*/\1/')"
     local checksum
     checksum="$(compute_checksum "$f")"
+
+    # Skip if version exceeds max_version
+    if [ -n "$max_version" ] && [ "$version" -gt "$max_version" ]; then
+      echo "  SKIP  $filename (exceeds max version $max_version)"
+      continue
+    fi
 
     local already
     already=$($PSQL -tAc "SELECT 1 FROM _schema_migrations WHERE version = '$version'")
@@ -104,11 +111,15 @@ rollback() {
 }
 
 case "${1:-migrate}" in
-  migrate)  migrate ;;
+  migrate)  migrate "${2:-}" ;;
   status)   status ;;
   rollback) rollback "${2:-}" ;;
   *)
-    echo "Usage: $0 {migrate|status|rollback <version>}"
+    echo "Usage: $0 {migrate [max_version]|status|rollback <version>}"
+    echo "Examples:"
+    echo "  $0 migrate        # Apply all pending migrations"
+    echo "  $0 migrate 003    # Apply only migrations up to V003"
+    echo "  $0 rollback 004   # Rollback to version 004"
     exit 1
     ;;
 esac

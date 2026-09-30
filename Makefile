@@ -10,11 +10,12 @@ help:
 	@echo "  make reset           - Reset database to initial state"
 	@echo ""
 	@echo "MIGRATION OPERATIONS:"
-	@echo "  make migrate         - Apply all pending migrations"
-	@echo "  make status          - Show migration status"
-	@echo "  make seed            - Insert sample data (users, products, orders)"
-	@echo "  make drop-tables     - Drop all tables (destructive!)"
-	@echo "  make rollback V=004  - Rollback to specific version"
+	@echo "  make migrate                 - Apply all pending migrations"
+	@echo "  make migrate MAX_VERSION=003 - Apply only migrations up to V003"
+	@echo "  make status                  - Show migration status"
+	@echo "  make seed                    - Insert sample data (users, products, orders)"
+	@echo "  make drop-tables             - Drop all tables (destructive!)"
+	@echo "  make rollback V=004          - Rollback to specific version"
 	@echo "  make new-migration V=007 DESC=add_payment_methods"
 	@echo ""
 	@echo "LAB EXERCISES:"
@@ -55,8 +56,13 @@ reset: down clean setup
 	@echo "Database reset complete."
 
 migrate:
-	@echo "Applying migrations..."
+ifdef MAX_VERSION
+	@echo "Applying migrations up to V$(MAX_VERSION)..."
+	./scripts/migrate.sh migrate $(MAX_VERSION)
+else
+	@echo "Applying all migrations..."
 	./scripts/migrate.sh migrate
+endif
 
 status:
 	@echo "Migration status:"
