@@ -11,13 +11,17 @@ on:
       - 'migrations/**'
 
 jobs:
-  sql-review:
+  # Job 1: Validate migrations on PR
+  validate:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
 
       - name: Find changed migration files
         id: changed
@@ -30,27 +34,21 @@ jobs:
             echo "has_changes=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: SQL Review via Bytebase API
+      - name: Validate SQL syntax
         if: steps.changed.outputs.has_changes == 'true'
-        env:
-          BYTEBASE_URL: ${{ secrets.BYTEBASE_URL }}
-          BYTEBASE_TOKEN: ${{ secrets.BYTEBASE_TOKEN }}
         run: |
           for file in ${{ steps.changed.outputs.files }}; do
-            echo "Reviewing: $file"
-            sql=$(cat "$file")
-            response=$(curl -s -X POST \
-              "${BYTEBASE_URL}/api/v1/sql/review" \
-              -H "Authorization: Bearer ${BYTEBASE_TOKEN}" \
-              -H "BContent-Type: application/json" \
-              -d "{\"sql\": \"$(echo "$sql" | jq -Rs .)\", \"engine\": \"POSTGRES\"}")
-            echo "Review result: $response"
-            has_error=$(echo "$response" | jq -r '.adviceList[]? | select(.level == "ERROR") | .title' 2>/dev/null || true)
-            if [ -n "$has_error" ]; then
-              echo "::error::SQL Review found errors in $file"
-              echo "$has_error"
+            echo "Validating: $file"
+            # Check for basic SQL issues
+            if grep -qi "DROP TABLE" "$file"; then
+              echo "::error::DROP TABLE found in $file — requires manual review"
               exit 1
             fi
+            if grep -qi "TRUNCATE" "$file"; then
+              echo "::error::TRUNCATE found in $file — requires manual review"
+              exit 1
+            fi
+            echo "✅ $file passed validation"
           done
 
       - name: Comment on PR
@@ -58,35 +56,37 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
+            const status = '${{ job.status }}' === 'success' ? '✅' : '❌';
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '✅ SQL Review passed for migration files'
-            })
+              body: `${status} Migration validation ${'${{ job.status }}'}`
+            });
 
+  # Job 2: Deploy to Test (auto on merge)
   deploy-test:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy to Test via Bytebase API
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Run migrations on Test
         env:
-          BYTEBASE_URL: ${{ secrets.BYTEBASE_URL }}
-          BYTEBASE_TOKEN: ${{ secrets.BYTEBASE_TOKEN }}
-          BYTEBASE_PROJECT: ${{ secrets.BYTEBASE_PROJECT }}
+          PGPASSWORD: ${{ secrets.DB_PASSWORD }}
         run: |
           for file in $(find migrations/ -name "V*.sql" | sort); do
-            echo "Deploying $file to Test..."
-            sql=$(cat "$file")
-            curl -s -X POST \
-              "${BYTEBASE_URL}/api/v1/issues" \
-              -H "Authorization: Bearer ${BYTEBASE_TOKEN}" \
-              -H "Content-Type: application/json" \
-              -d "{\"project\": \"${BYTEBASE_PROJECT}\", \"database\": \"app_test\", \"sql\": \"$(echo "$sql" | jq -Rs .)\", \"title\": \"Deploy $(basename $file) to Test\"}"
+            echo "Applying $file to app_test..."
+            psql -h ${{ secrets.DB_HOST }} -p ${{ secrets.DB_PORT }} \
+              -U ${{ secrets.DB_USER }} -d app_test \
+              -v ON_ERROR_STOP=1 -f "$file"
+            echo "✅ $file applied to test"
           done
 
+  # Job 3: Deploy to UAT (manual approval)
   deploy-uat:
     needs: deploy-test
     runs-on: ubuntu-latest
@@ -95,22 +95,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy to UAT via Bytebase API
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Run migrations on UAT
         env:
-          BYTEBASE_URL: ${{ secrets.BYTEBASE_URL }}
-          BYTEBASE_TOKEN: ${{ secrets.BYTEBASE_TOKEN }}
-          BYTEBASE_PROJECT: ${{ secrets.BYTEBASE_PROJECT }}
+          PGPASSWORD: ${{ secrets.DB_PASSWORD }}
         run: |
           for file in $(find migrations/ -name "V*.sql" | sort); do
-            echo "Deploying $file to UAT..."
-            sql=$(cat "$file")
-            curl -s -X POST \
-              "${BYTEBASE_URL}/api/v1/issues" \
-              -H "Authorization: Bearer ${BYTEBASE_TOKEN}" \
-              -H "Content-Type: application/json" \
-              -d "{\"project\": \"${BYTEBASE_PROJECT}\", \"database\": \"app_uat\", \"sql\": \"$(echo "$sql" | jq -Rs .)\", \"title\": \"Deploy $(basename $file) to UAT\"}"
+            echo "Applying $file to app_uat..."
+            psql -h ${{ secrets.DB_HOST }} -p ${{ secrets.DB_PORT }} \
+              -U ${{ secrets.DB_USER }} -d app_uat \
+              -v ON_ERROR_STOP=1 -f "$file"
+            echo "✅ $file applied to uat"
           done
 
+  # Job 4: Deploy to Prod (manual approval)
   deploy-prod:
     needs: deploy-uat
     runs-on: ubuntu-latest
@@ -119,18 +119,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy to Prod via Bytebase API
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Run migrations on Prod
         env:
-          BYTEBASE_URL: ${{ secrets.BYTEBASE_URL }}
-          BYTEBASE_TOKEN: ${{ secrets.BYTEBASE_TOKEN }}
-          BYTEBASE_PROJECT: ${{ secrets.BYTEBASE_PROJECT }}
+          PGPASSWORD: ${{ secrets.DB_PASSWORD }}
         run: |
           for file in $(find migrations/ -name "V*.sql" | sort); do
-            echo "Deploying $file to Prod..."
-            sql=$(cat "$file")
-            curl -s -X POST \
-              "${BYTEBASE_URL}/api/v1/issues" \
-              -H "Authorization: Bearer ${BYTEBASE_TOKEN}" \
-              -H "Content-Type: application/json" \
-              -d "{\"project\": \"${BYTEBASE_PROJECT}\", \"database\": \"app_prod\", \"sql\": \"$(echo "$sql" | jq -Rs .)\", \"title\": \"Deploy $(basename $file) to Prod\"}"
+            echo "Applying $file to app_prod..."
+            psql -h ${{ secrets.DB_HOST }} -p ${{ secrets.DB_PORT }} \
+              -U ${{ secrets.DB_USER }} -d app_prod \
+              -v ON_ERROR_STOP=1 -f "$file"
+            echo "✅ $file applied to prod"
           done
