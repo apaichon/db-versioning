@@ -113,8 +113,15 @@ psql:
 	PGPASSWORD=tutorial_secret psql -h localhost -U tutorial -d app_db
 
 bytebase:
-	@echo "Opening Bytebase UI..."
-	@open http://localhost:8088 2>/dev/null || echo "Open http://localhost:8088 in your browser"
+	@echo "Checking Bytebase..."
+	@if ! docker ps --format '{{.Names}}' | grep -q 'db-versioning-bytebase'; then \
+		echo "Bytebase not running. Starting..."; \
+		docker compose up -d bytebase; \
+		echo "Waiting for Bytebase to be ready..."; \
+		sleep 5; \
+	fi
+	@echo "Bytebase UI: http://localhost:8088"
+	@open http://localhost:8088 2>/dev/null || echo "Open http://localhost:8088 in your browser"!
 
 slides:
 	@echo "Starting Slidev presentation..."
