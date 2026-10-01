@@ -40,7 +40,6 @@ migrate() {
     local checksum
     checksum="$(compute_checksum "$f")"
 
-    # Skip if version exceeds max_version
     if [ -n "$max_version" ] && [ "$version" -gt "$max_version" ]; then
       echo "  SKIP  $filename (exceeds max version $max_version)"
       continue
@@ -59,11 +58,12 @@ migrate() {
     applied=$((applied + 1))
   done
 
-  echo "Applied $applied migration(s)."
+  echo "Applied $applied migration(s) to $DB_NAME."
 }
 
 status() {
   ensure_tracking_table
+  echo "Database: $DB_NAME"
   echo "Applied migrations:"
   $PSQL -c "SELECT version, filename, applied_at FROM _schema_migrations ORDER BY version"
   echo ""
@@ -101,6 +101,7 @@ rollback() {
     exit 1
   fi
 
+  echo "Database: $DB_NAME"
   echo "Current version: $current"
   echo "Rolling back to version: $target"
   echo "WARNING: This requires manual rollback SQL files."
@@ -115,11 +116,12 @@ case "${1:-migrate}" in
   status)   status ;;
   rollback) rollback "${2:-}" ;;
   *)
-    echo "Usage: $0 {migrate [max_version]|status|rollback <version>}"
+    echo "Usage: DB_NAME=app_test $0 {migrate [max_version]|status|rollback <version>}"
     echo "Examples:"
-    echo "  $0 migrate        # Apply all pending migrations"
-    echo "  $0 migrate 003    # Apply only migrations up to V003"
-    echo "  $0 rollback 004   # Rollback to version 004"
+    echo "  DB_NAME=app_test $0 migrate        # Apply all to test"
+    echo "  DB_NAME=app_prod $0 migrate 003    # Apply up to V003 to prod"
+    echo "  DB_NAME=app_uat $0 status          # Check uat status"
+    echo "  DB_NAME=app_prod $0 rollback 004   # Rollback prod to 004"
     exit 1
     ;;
 esac

@@ -1,4 +1,4 @@
-.PHONY: help setup down migrate status rollback new-migration seed drop-tables large-data backfill bytebase slides lab1 lab2 lab3 lab4 clean reset api-install api-start api-test
+.PHONY: help setup down migrate status rollback new-migration seed drop-tables large-data backfill create-envs compare-envs bytebase slides lab1 lab2 lab3 lab4 clean reset api-install api-start api-test
 
 help:
 	@echo "Database Version Control Tutorial - Available Commands"
@@ -8,6 +8,13 @@ help:
 	@echo "  make down            - Stop all containers"
 	@echo "  make clean           - Remove containers and volumes (destructive)"
 	@echo "  make reset           - Reset database to initial state"
+	@echo ""
+	@echo "ENVIRONMENT MANAGEMENT:"
+	@echo "  make create-envs     - Create test, uat, prod databases"
+	@echo "  make compare-envs    - Compare schemas across environments"
+	@echo "  make migrate ENV=test MAX_VERSION=003  - Migrate specific env"
+	@echo "  make seed ENV=uat TABLES='users'       - Seed specific env"
+	@echo "  make status ENV=prod                   - Status for specific env"
 	@echo ""
 	@echo "MIGRATION OPERATIONS:"
 	@echo "  make migrate                 - Apply all pending migrations"
@@ -65,7 +72,24 @@ clean:
 reset: down clean setup
 	@echo "Database reset complete."
 
+create-envs:
+	@echo "Creating environment databases (test, uat, prod)..."
+	./scripts/create-env-databases.sh
+
+compare-envs:
+	@echo "Comparing environments..."
+	./scripts/compare-envs.sh
+
 migrate:
+ifdef ENV
+ifdef MAX_VERSION
+	@echo "Applying migrations up to V$(MAX_VERSION) to app_$(ENV)..."
+	DB_NAME=app_$(ENV) ./scripts/migrate.sh migrate $(MAX_VERSION)
+else
+	@echo "Applying all migrations to app_$(ENV)..."
+	DB_NAME=app_$(ENV) ./scripts/migrate.sh migrate
+endif
+else
 ifdef MAX_VERSION
 	@echo "Applying migrations up to V$(MAX_VERSION)..."
 	./scripts/migrate.sh migrate $(MAX_VERSION)
@@ -73,18 +97,34 @@ else
 	@echo "Applying all migrations..."
 	./scripts/migrate.sh migrate
 endif
+endif
 
 status:
+ifdef ENV
+	@echo "Migration status for app_$(ENV):"
+	DB_NAME=app_$(ENV) ./scripts/migrate.sh status
+else
 	@echo "Migration status:"
 	./scripts/migrate.sh status
+endif
 
 seed:
+ifdef ENV
+ifdef TABLES
+	@echo "Seeding app_$(ENV) with: $(TABLES)..."
+	DB_NAME=app_$(ENV) ./scripts/seed-data.sh $(TABLES)
+else
+	@echo "Seeding app_$(ENV) with all data..."
+	DB_NAME=app_$(ENV) ./scripts/seed-data.sh
+endif
+else
 ifdef TABLES
 	@echo "Seeding database with sample data for tables: $(TABLES)..."
 	./scripts/seed-data.sh $(TABLES)
 else
 	@echo "Seeding database with all sample data..."
 	./scripts/seed-data.sh
+endif
 endif
 
 drop-tables:

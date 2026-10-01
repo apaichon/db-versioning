@@ -27,26 +27,38 @@ else
   TABLES=("$@")
 fi
 
-echo "Seeding database with sample data..."
+echo "Seeding database: $DB_NAME"
 echo "Tables: ${TABLES[*]}"
 echo ""
 
+# Detect if email_address column exists (V007 applied)
+HAS_EMAIL_ADDRESS=$($PSQL -tAc "
+  SELECT 1 FROM information_schema.columns
+  WHERE table_name = 'users' AND column_name = 'email_address'
+" 2>/dev/null || echo "0")
+
 for table in "${TABLES[@]}"; do
   seed_file="${SEED_FILES[$table]:-}"
-  
+
   if [ -z "$seed_file" ]; then
     echo "ERROR: Unknown table '$table'"
     echo "Available tables: ${!SEED_FILES[*]}"
     exit 1
   fi
-  
+
+  # Use v2 seed for users if email_address column exists
+  if [ "$table" = "users" ] && [ "$HAS_EMAIL_ADDRESS" = "1" ]; then
+    seed_file="seed_users_v2.sql"
+    echo "  (detected email_address column, using v2 seed)"
+  fi
+
   seed_path="$SEED_DIR/$seed_file"
-  
+
   if [ ! -f "$seed_path" ]; then
     echo "ERROR: Seed file not found: $seed_path"
     exit 1
   fi
-  
+
   echo "  Seeding $table..."
   $PSQL -q -f "$seed_path"
 done
