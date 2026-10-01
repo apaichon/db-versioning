@@ -49,11 +49,19 @@ make seed ENV=prod TABLES="users products orders order_items"
 
 ### Step 3: Generate Bytebase API Token
 
-1. Click **Settings** > **Access Tokens**
-2. Click **Create Token**
-3. Name: `github-actions`
-4. Copy the token value (e.g., `bb-token-xxxxx`)
-5. Save it for GitHub Secrets
+**Note:** This is a Bytebase API token, NOT a GitHub access token.
+
+1. Open Bytebase at `http://localhost:8088`
+2. Click **Settings** > **Access Tokens**
+3. Click **Create Token**
+4. Name: `github-actions`
+5. Copy the token value (e.g., `bb-token-xxxxx`)
+6. Save it for GitHub Secrets (Step 4)
+
+| Token | Source | Used For |
+|-------|--------|----------|
+| `BYTEBASE_TOKEN` | Bytebase > Settings > Access Tokens | Authenticate API calls to Bytebase |
+| `GITHUB_TOKEN` | GitHub (auto-provided in Actions) | GitHub Actions operations |
 
 ### Step 4: Set Up GitHub Repository
 
