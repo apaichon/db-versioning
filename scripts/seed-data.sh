@@ -8,7 +8,7 @@ DB_NAME="${DB_NAME:-app_db}"
 export PGPASSWORD="${DB_PASSWORD:-tutorial_secret}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-SEED_DIR="$SCRIPT_DIR/migrations"
+SEED_DIR="$SCRIPT_DIR/seed"
 
 PSQL="psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -v ON_ERROR_STOP=1"
 
