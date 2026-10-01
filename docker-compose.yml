@@ -10,6 +10,7 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./scripts/init-databases.sql:/docker-entrypoint-initdb.d/01-init-databases.sql
       - ./migrations:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U tutorial -d app_db"]
@@ -21,7 +22,7 @@ services:
     image: bytebase/bytebase:latest
     container_name: db-versioning-bytebase
     environment:
-      PG_URL: postgres://tutorial:tutorial_secret@postgres:5432/app_db
+      PG_URL: postgres://tutorial:tutorial_secret@postgres:5432/bytebase_db
     ports:
       - "8088:8080"
     volumes:

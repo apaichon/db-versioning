@@ -49,7 +49,7 @@ setup:
 	@docker compose exec postgres pg_isready -U tutorial -d app_db
 	@echo ""
 	@echo "PostgreSQL: localhost:5432 (user: tutorial, password: tutorial_secret, db: app_db)"
-	@echo "Bytebase:   http://localhost:8088"
+	@echo "Bytebase:   http://localhost:8088 (metadata stored in bytebase_db)"
 	@echo ""
 	@echo "Run 'make migrate' to apply migrations"
 

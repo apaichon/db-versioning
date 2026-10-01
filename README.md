@@ -58,9 +58,23 @@ docker compose exec postgres pg_isready -U tutorial -d app_db
 ### 2. Verify Connection
 
 ```bash
+# Application database (your tables)
 psql -h localhost -U tutorial -d app_db
 # Password: tutorial_secret
+
+# Bytebase database (internal tables, separate from app)
+psql -h localhost -U tutorial -d bytebase_db
 ```
+
+### 3. Database Separation
+
+```
+PostgreSQL Instance
+├── app_db          ← Application tables (users, orders, products, etc.)
+└── bytebase_db     ← Bytebase internal tables (metadata, audit, etc.)
+```
+
+This keeps your application tables clean and separate from Bytebase internals.
 
 ### 3. Project Structure
 
