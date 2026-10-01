@@ -26,7 +26,7 @@ help:
 	@echo "  make lab4            - Lab 4: Bytebase risk management"
 	@echo ""
 	@echo "TOOLS:"
-	@echo "  make bytebase        - Open Bytebase UI (http://localhost:8080)"
+	@echo "  make bytebase        - Open Bytebase UI (http://localhost:8088)"
 	@echo "  make slides          - Start Slidev presentation"
 	@echo "  make psql            - Open PostgreSQL shell"
 	@echo ""
@@ -49,7 +49,7 @@ setup:
 	@docker compose exec postgres pg_isready -U tutorial -d app_db
 	@echo ""
 	@echo "PostgreSQL: localhost:5432 (user: tutorial, password: tutorial_secret, db: app_db)"
-	@echo "Bytebase:   http://localhost:8080"
+	@echo "Bytebase:   http://localhost:8088"
 	@echo ""
 	@echo "Run 'make migrate' to apply migrations"
 
@@ -114,7 +114,7 @@ psql:
 
 bytebase:
 	@echo "Opening Bytebase UI..."
-	@open http://localhost:8080 2>/dev/null || echo "Open http://localhost:8080 in your browser"
+	@open http://localhost:8088 2>/dev/null || echo "Open http://localhost:8088 in your browser"
 
 slides:
 	@echo "Starting Slidev presentation..."
@@ -216,7 +216,7 @@ lab4:
 	@echo ""
 	@echo "Quick Start:"
 	@echo "  1. make setup"
-	@echo "  2. make bytebase       # Open http://localhost:8080"
+	@echo "  2. make bytebase       # Open http://localhost:8088"
 	@echo "  3. Register admin account"
 	@echo "  4. Add PostgreSQL instance"
 	@echo "  5. Configure risk rules"

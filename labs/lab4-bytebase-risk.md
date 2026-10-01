@@ -24,7 +24,7 @@ make seed
 make bytebase
 ```
 
-Or open `http://localhost:8080` in your browser.
+Or open `http://localhost:8088` in your browser.
 
 ### Step 3: Register Admin Account
 

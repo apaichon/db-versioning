@@ -1280,7 +1280,7 @@ docker compose up -d
 
 ### Step 2: Access Bytebase
 
-Open `http://localhost:8080` and register admin account
+Open `http://localhost:8088` and register admin account
 
 </div>
 

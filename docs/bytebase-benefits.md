@@ -420,7 +420,7 @@ Every change is recorded with:
 ## Getting Started Checklist
 
 - [ ] Start Bytebase: `docker compose up -d bytebase`
-- [ ] Register admin account at `http://localhost:8080`
+- [ ] Register admin account at `http://localhost:8088`
 - [ ] Add PostgreSQL instance
 - [ ] Create a project
 - [ ] Configure environments (dev/test/prod)

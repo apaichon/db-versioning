@@ -311,12 +311,12 @@ CRITICAL      CTO -> DBA -> Security
 
 ```bash
 # Bytebase is already running via docker-compose
-open http://localhost:8080
+open http://localhost:8088
 ```
 
 ### 2. Register Admin Account
 
-- Open `http://localhost:8080`
+- Open `http://localhost:8088`
 - Register as admin (first login)
 
 ### 3. Add PostgreSQL Instance
