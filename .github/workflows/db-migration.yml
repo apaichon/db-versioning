@@ -1,0 +1,136 @@
+name: Database Migration CI/CD
+
+on:
+  pull_request:
+    paths:
+      - 'migrations/**'
+  push:
+    branches:
+      - main
+    paths:
+      - 'migrations/**'
+
+jobs:
+  sql-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find changed migration files
+        id: changed
+        run: |
+          files=$(git diff --name-only origin/main HEAD -- migrations/V*.sql || true)
+          echo "files=$files" >> $GITHUB_OUTPUT
+          if [ -z "$files" ]; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: SQL Review via Bytebase API
+        if: steps.changed.outputs.has_changes == 'true'
+        env:
+          BYTEBASE_URL: ${{ secrets.BYTEBASE_URL }}
+          BYTEBASE_TOKEN: ${{ secrets.BYTEBASE_TOKEN }}
+        run: |
+          for file in ${{ steps.changed.outputs.files }}; do
+            echo "Reviewing: $file"
+            sql=$(cat "$file")
+            response=$(curl -s -X POST \
+              "${BYTEBASE_URL}/api/v1/sql/review" \
+              -H "Authorization: Bearer ${BYTEBASE_TOKEN}" \
+              -H "BContent-Type: application/json" \
+              -d "{\"sql\": \"$(echo "$sql" | jq -Rs .)\", \"engine\": \"POSTGRES\"}")
+            echo "Review result: $response"
+            has_error=$(echo "$response" | jq -r '.adviceList[]? | select(.level == "ERROR") | .title' 2>/dev/null || true)
+            if [ -n "$has_error" ]; then
+              echo "::error::SQL Review found errors in $file"
+              echo "$has_error"
+              exit 1
+            fi
+          done
+
+      - name: Comment on PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ SQL Review passed for migration files'
+            })
+
+  deploy-test:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Test via Bytebase API
+        env:
+          BYTEBASE_URL: ${{ secrets.BYTEBASE_URL }}
+          BYTEBASE_TOKEN: ${{ secrets.BYTEBASE_TOKEN }}
+          BYTEBASE_PROJECT: ${{ secrets.BYTEBASE_PROJECT }}
+        run: |
+          for file in $(find migrations/ -name "V*.sql" | sort); do
+            echo "Deploying $file to Test..."
+            sql=$(cat "$file")
+            curl -s -X POST \
+              "${BYTEBASE_URL}/api/v1/issues" \
+              -H "Authorization: Bearer ${BYTEBASE_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "{\"project\": \"${BYTEBASE_PROJECT}\", \"database\": \"app_test\", \"sql\": \"$(echo "$sql" | jq -Rs .)\", \"title\": \"Deploy $(basename $file) to Test\"}"
+          done
+
+  deploy-uat:
+    needs: deploy-test
+    runs-on: ubuntu-latest
+    environment:
+      name: uat
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to UAT via Bytebase API
+        env:
+          BYTEBASE_URL: ${{ secrets.BYTEBASE_URL }}
+          BYTEBASE_TOKEN: ${{ secrets.BYTEBASE_TOKEN }}
+          BYTEBASE_PROJECT: ${{ secrets.BYTEBASE_PROJECT }}
+        run: |
+          for file in $(find migrations/ -name "V*.sql" | sort); do
+            echo "Deploying $file to UAT..."
+            sql=$(cat "$file")
+            curl -s -X POST \
+              "${BYTEBASE_URL}/api/v1/issues" \
+              -H "Authorization: Bearer ${BYTEBASE_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "{\"project\": \"${BYTEBASE_PROJECT}\", \"database\": \"app_uat\", \"sql\": \"$(echo "$sql" | jq -Rs .)\", \"title\": \"Deploy $(basename $file) to UAT\"}"
+          done
+
+  deploy-prod:
+    needs: deploy-uat
+    runs-on: ubuntu-latest
+    environment:
+      name: prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Prod via Bytebase API
+        env:
+          BYTEBASE_URL: ${{ secrets.BYTEBASE_URL }}
+          BYTEBASE_TOKEN: ${{ secrets.BYTEBASE_TOKEN }}
+          BYTEBASE_PROJECT: ${{ secrets.BYTEBASE_PROJECT }}
+        run: |
+          for file in $(find migrations/ -name "V*.sql" | sort); do
+            echo "Deploying $file to Prod..."
+            sql=$(cat "$file")
+            curl -s -X POST \
+              "${BYTEBASE_URL}/api/v1/issues" \
+              -H "Authorization: Bearer ${BYTEBASE_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "{\"project\": \"${BYTEBASE_PROJECT}\", \"database\": \"app_prod\", \"sql\": \"$(echo "$sql" | jq -Rs .)\", \"title\": \"Deploy $(basename $file) to Prod\"}"
+          done

@@ -1,4 +1,4 @@
-.PHONY: help setup down migrate status rollback new-migration seed drop-tables large-data backfill create-envs compare-envs bytebase slides lab1 lab2 lab3 lab4 clean reset api-install api-start api-test
+.PHONY: help setup down migrate status rollback new-migration seed drop-tables large-data backfill create-envs compare-envs bytebase slides lab1 lab2 lab3 lab4 lab5 clean reset api-install api-start api-test
 
 help:
 	@echo "Database Version Control Tutorial - Available Commands"
@@ -31,6 +31,7 @@ help:
 	@echo "  make lab2            - Lab 2: Safe schema changes"
 	@echo "  make lab3            - Lab 3: Risky changes & rollback"
 	@echo "  make lab4            - Lab 4: Bytebase risk management"
+	@echo "  make lab5            - Lab 5: CI/CD GitOps with Bytebase"
 	@echo ""
 	@echo "TOOLS:"
 	@echo "  make bytebase        - Open Bytebase UI (http://localhost:8088)"
@@ -274,4 +275,24 @@ lab4:
 	@echo " 10. make bytebase                 # Open Bytebase (free version)"
 	@echo ""
 	@echo "Run 'cat labs/lab4-bytebase-risk.md' for full instructions"
+	@echo ""
+
+lab5:
+	@echo "=========================================="
+	@echo "Lab 5: CI/CD GitOps with Bytebase"
+	@echo "=========================================="
+	@echo ""
+	@echo "Full instructions: labs/lab5-cicd-gitops.md"
+	@echo ""
+	@echo "Quick Start:"
+	@echo "  1. make setup && make create-envs"
+	@echo "  2. make migrate ENV=test MAX_VERSION=003"
+	@echo "  3. make migrate ENV=uat && make migrate ENV=prod"
+	@echo "  4. make bytebase               # Set up project + API token"
+	@echo "  5. Add GitHub Secrets:"
+	@echo "     BYTEBASE_URL, BYTEBASE_TOKEN, BYTEBASE_PROJECT"
+	@echo "  6. Create PR with new migration"
+	@echo "  7. GitHub Actions: SQL Review → Deploy Test → UAT → Prod"
+	@echo ""
+	@echo "Run 'cat labs/lab5-cicd-gitops.md' for full instructions"
 	@echo ""

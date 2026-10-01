@@ -81,7 +81,7 @@ You should see databases: `app_test`, `app_uat`, `app_prod`
 
 ### Step 7: Submit Schema Change to Test
 
-1. Click **Databases** > `app_test` > **Edit Schema**
+1. Click **Databases** > `app_test` > **Change Database**
 2. Paste:
 
 ```sql
@@ -103,7 +103,7 @@ CREATE TABLE feedback (
 
 ### Step 8: Submit Same Change to UAT
 
-1. Click **Databases** > `app_uat` > **Edit Schema**
+1. Click **Databases** > `app_uat` > **Change Database**
 2. Paste the same SQL
 3. Click **Create**
 
@@ -114,7 +114,7 @@ CREATE TABLE feedback (
 
 ### Step 9: Submit Same Change to Prod
 
-1. Click **Databases** > `app_prod` > **Edit Schema**
+1. Click **Databases** > `app_prod` > **Change Database**
 2. Paste the same SQL
 3. Click **Create**
 
