@@ -8,6 +8,7 @@ drawings:
   persist: false
 transition: slide-left
 mdc: true
+hideInPresenter: true
 ---
 
 # Database Version Control
