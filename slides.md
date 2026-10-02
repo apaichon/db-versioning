@@ -8,8 +8,25 @@ drawings:
   persist: false
 transition: slide-left
 mdc: true
-hideInPresenter: true
+toc: false
 ---
+
+<style>
+/* Hide autocomplete/TOC list in presenter view */
+.autocomplete-list,
+.slidev-autocomplete,
+[role="listbox"],
+.slidev-presenter .slide-nav,
+.slidev-presenter .toc-panel,
+.slidev-presenter [class*="toc"],
+.slidev-presenter [class*="autocomplete"] {
+  display: none !important;
+  visibility: hidden !important;
+  width: 0 !important;
+  height: 0 !important;
+  overflow: hidden !important;
+}
+</style>
 
 # Database Version Control
 
@@ -55,6 +72,19 @@ Database changes without version control lead to:
 
 </div>
 
+</div>
+
+---
+layout: center
+class: text-center
+---
+
+# Question
+
+## How do you control database version?
+
+<div class="pt-8 text-xl opacity-60">
+Think about it...
 </div>
 
 ---
